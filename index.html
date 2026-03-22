@@ -13,8 +13,18 @@
 <body class="p-4">
 
     <div class="max-w-2xl w-full text-center">
-        <h1 class="text-2xl font-bold text-gray-800 mb-2">대칭: <span class="text-blue-600 font-serif">y = 2ˣ</span> & <span class="text-red-600 font-serif">y = log₂(x)</span> about <span class="text-gray-500 font-serif">y = x</span></h1>
+        <h1 class="text-2xl font-bold text-gray-800 mb-2">대칭: <span id="expTitle" class="text-blue-600 font-serif">y = 2<sup>x</sup></span> & <span id="logTitle" class="text-red-600 font-serif">y = log<sub>2</sub>(x)</span> about <span class="text-gray-500 font-serif">y = x</span></h1>
         
+        <div class="mb-4 flex justify-center space-x-6">
+            <label class="inline-flex items-center cursor-pointer">
+                <input type="radio" name="baseSelect" value="2" class="form-radio h-5 w-5 text-blue-600" checked onchange="changeBase(2)">
+                <span class="ml-2 text-gray-700 font-medium">밑이 2 (a > 1)</span>
+            </label>
+            <label class="inline-flex items-center cursor-pointer">
+                <input type="radio" name="baseSelect" value="0.5" class="form-radio h-5 w-5 text-blue-600" onchange="changeBase(0.5)">
+                <span class="ml-2 text-gray-700 font-medium">밑이 1/2 (0 < a < 1)</span>
+            </label>
+        </div>
         
         <div class="relative inline-block">
             <canvas id="mathCanvas" width="600" height="600" class="max-w-full h-auto"></canvas>
@@ -41,25 +51,73 @@
         function m2cX(x) { return (x - MIN_VAL) / RANGE * canvas.width; }
         function m2cY(y) { return canvas.height - (y - MIN_VAL) / RANGE * canvas.height; }
 
-        // 데이터 생성 (파이썬 코드의 x_exp = np.linspace(-5, 10, 400) 역할)
-        const expPoints = [];
-        const step = (MAX_VAL - MIN_VAL) / 300; // 해상도
-        for (let x = MIN_VAL; x <= MAX_VAL; x += step) {
-            const y = Math.pow(2, x);
-            expPoints.push({ x: x, y: y });
-        }
-
-        const validPoints = expPoints.filter(p => p.y <= MAX_VAL && p.y >= 0.01);
-        const keyXs = [-1, 0, 1, 2, 3];
-        // 각 핵심 점에 도달하는 프레임 인덱스 계산
-        const stepFrames = keyXs.map(kx => validPoints.findIndex(p => p.x >= kx));
-        stepFrames.push(validPoints.length); // 마지막 단계: 그래프 끝까지 완성
-
+        let currentBase = 2;
+        let expPoints = [];
+        let validPoints = [];
+        let keyXs = [];
+        let stepFrames = [];
+        
         let currentFrame = 0;
         let targetFrame = 0;
         let currentStep = 0;
         let isPlaying = false;
         let animationId;
+
+        function updateTitle() {
+            const expTitle = document.getElementById('expTitle');
+            const logTitle = document.getElementById('logTitle');
+            if (currentBase === 2) {
+                expTitle.innerHTML = 'y = 2<sup>x</sup>';
+                logTitle.innerHTML = 'y = log<sub>2</sub>(x)';
+            } else {
+                expTitle.innerHTML = 'y = (1/2)<sup>x</sup>';
+                logTitle.innerHTML = 'y = log<sub>1/2</sub>(x)';
+            }
+        }
+
+        function initData() {
+            expPoints = [];
+            const step = (MAX_VAL - MIN_VAL) / 300; // 해상도
+            for (let x = MIN_VAL; x <= MAX_VAL; x += step) {
+                const y = Math.pow(currentBase, x);
+                expPoints.push({ x: x, y: y });
+            }
+
+            validPoints = expPoints.filter(p => p.y <= MAX_VAL && p.y >= 0.01);
+            
+            if (currentBase === 2) {
+                keyXs = [-1, 0, 1, 2, 3];
+            } else {
+                // 밑이 1/2일 때는 y값이 너무 커지지 않도록 음수 쪽 점들을 선택
+                keyXs = [-3, -2, -1, 0, 1];
+            }
+            
+            // 각 핵심 점에 도달하는 프레임 인덱스 계산
+            stepFrames = keyXs.map(kx => validPoints.findIndex(p => p.x >= kx));
+            stepFrames.push(validPoints.length); // 마지막 단계: 그래프 끝까지 완성
+        }
+
+        function changeBase(newBase) {
+            currentBase = newBase;
+            updateTitle();
+            initData();
+            
+            // 상태 초기화
+            currentFrame = 0;
+            currentStep = 0;
+            targetFrame = 0;
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            
+            nextBtn.innerText = "다음 단계";
+            nextBtn.disabled = false;
+            nextBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            drawAnimation();
+        }
+
+        // 초기 데이터 로드
+        initData();
 
         function drawGridAndAxes() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -159,18 +217,28 @@
             ctx.font = 'bold 13px sans-serif';
             
             keyXs.forEach((kx, index) => {
-                const ky = Math.pow(2, kx);
+                const ky = Math.pow(currentBase, kx);
+                
+                // y값이 소수인 경우 분수 형태로 표시하여 가독성 높임
+                let kyStr = ky;
+                let kxStr = kx;
+                if (currentBase === 0.5) {
+                    if (ky === 0.5) kyStr = "1/2";
+                    else if (ky === 0.25) kyStr = "1/4";
+                    else if (ky === 0.125) kyStr = "1/8";
+                }
+
                 // 애니메이션이 해당 단계의 목표 프레임 이상 진행되었을 때 표시
                 if (currentFrame >= stepFrames[index]) {
                     // 원래 지수함수의 점 (파란색)
                     ctx.fillStyle = '#2563eb';
                     ctx.beginPath(); ctx.arc(m2cX(kx), m2cY(ky), 5, 0, Math.PI * 2); ctx.fill();
-                    ctx.fillText(`(${kx}, ${ky})`, m2cX(kx) - 50, m2cY(ky) - 10);
+                    ctx.fillText(`(${kxStr}, ${kyStr})`, m2cX(kx) - 50, m2cY(ky) - 10);
 
                     // 대칭된 로그함수의 점 (빨간색)
                     ctx.fillStyle = '#dc2626';
                     ctx.beginPath(); ctx.arc(m2cX(ky), m2cY(kx), 5, 0, Math.PI * 2); ctx.fill();
-                    ctx.fillText(`(${ky}, ${kx})`, m2cX(ky) + 10, m2cY(kx) + 15);
+                    ctx.fillText(`(${kyStr}, ${kxStr})`, m2cX(ky) + 10, m2cY(kx) + 15);
 
                     // 두 점을 잇는 강조 대칭선 (검은색 점선)
                     ctx.strokeStyle = '#475569';
