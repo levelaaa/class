@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>지수함수와 로그함수의 대칭 애니메이션</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background-color: #f8fafc; font-family: sans-serif; }
+        canvas { background-color: #ffffff; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border-radius: 0.5rem; }
+    </style>
+</head>
+<body class="p-4">
+
+    <div class="max-w-2xl w-full text-center">
+        <h1 class="text-2xl font-bold text-gray-800 mb-2">대칭: <span class="text-blue-600 font-serif">y = 2ˣ</span> & <span class="text-red-600 font-serif">y = log₂(x)</span> about <span class="text-gray-500 font-serif">y = x</span></h1>
+        
+        
+        <div class="relative inline-block">
+            <canvas id="mathCanvas" width="600" height="600" class="max-w-full h-auto"></canvas>
+        </div>
+
+        <div class="mt-6 space-x-4">
+            <button id="nextBtn" class="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition font-semibold shadow-md">다음 단계</button>
+            <button id="resetBtn" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-full hover:bg-gray-300 transition font-semibold shadow-md">다시 처음부터</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('mathCanvas');
+        const ctx = canvas.getContext('2d');
+        const nextBtn = document.getElementById('nextBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        // 그래프 설정
+        const MIN_VAL = -5;
+        const MAX_VAL = 10;
+        const RANGE = MAX_VAL - MIN_VAL;
+        
+        // 좌표 변환 함수 (수학 좌표 -> 캔버스 좌표)
+        function m2cX(x) { return (x - MIN_VAL) / RANGE * canvas.width; }
+        function m2cY(y) { return canvas.height - (y - MIN_VAL) / RANGE * canvas.height; }
+
+        // 데이터 생성 (파이썬 코드의 x_exp = np.linspace(-5, 10, 400) 역할)
+        const expPoints = [];
+        const step = (MAX_VAL - MIN_VAL) / 300; // 해상도
+        for (let x = MIN_VAL; x <= MAX_VAL; x += step) {
+            const y = Math.pow(2, x);
+            expPoints.push({ x: x, y: y });
+        }
+
+        const validPoints = expPoints.filter(p => p.y <= MAX_VAL && p.y >= 0.01);
+        const keyXs = [-1, 0, 1, 2, 3];
+        // 각 핵심 점에 도달하는 프레임 인덱스 계산
+        const stepFrames = keyXs.map(kx => validPoints.findIndex(p => p.x >= kx));
+        stepFrames.push(validPoints.length); // 마지막 단계: 그래프 끝까지 완성
+
+        let currentFrame = 0;
+        let targetFrame = 0;
+        let currentStep = 0;
+        let isPlaying = false;
+        let animationId;
+
+        function drawGridAndAxes() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // 그리드
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            for (let i = MIN_VAL; i <= MAX_VAL; i++) {
+                ctx.beginPath(); ctx.moveTo(m2cX(i), 0); ctx.lineTo(m2cX(i), canvas.height); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0, m2cY(i)); ctx.lineTo(canvas.width, m2cY(i)); ctx.stroke();
+            }
+
+            // 축
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            // X축
+            ctx.beginPath(); ctx.moveTo(0, m2cY(0)); ctx.lineTo(canvas.width, m2cY(0)); ctx.stroke();
+            // Y축
+            ctx.beginPath(); ctx.moveTo(m2cX(0), 0); ctx.lineTo(m2cX(0), canvas.height); ctx.stroke();
+            
+            // 축 라벨
+            ctx.fillStyle = '#64748b';
+            ctx.font = '14px sans-serif';
+            ctx.fillText('0', m2cX(0) + 5, m2cY(0) + 15);
+            ctx.fillText('x', canvas.width - 15, m2cY(0) - 10);
+            ctx.fillText('y', m2cX(0) + 10, 15);
+        }
+
+        function drawStaticLines() {
+            // y = x 대칭선
+            ctx.strokeStyle = '#9ca3af';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([8, 8]);
+            ctx.beginPath();
+            ctx.moveTo(m2cX(MIN_VAL), m2cY(MIN_VAL));
+            ctx.lineTo(m2cX(MAX_VAL), m2cY(MAX_VAL));
+            ctx.stroke();
+
+            // y = 2^x 지수함수
+            ctx.strokeStyle = 'rgba(37, 99, 235, 0.4)'; // 파란색 (약간 투명)
+            ctx.lineWidth = 3;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            expPoints.forEach((p, i) => {
+                if (i === 0) ctx.moveTo(m2cX(p.x), m2cY(p.y));
+                else ctx.lineTo(m2cX(p.x), m2cY(p.y));
+            });
+            ctx.stroke();
+        }
+
+        function drawAnimation() {
+            drawGridAndAxes();
+            drawStaticLines();
+
+            const drawCount = currentFrame;
+
+            // 대칭 연결선 그리기 (파이썬 코드의 connections 역할)
+            ctx.strokeStyle = 'rgba(220, 38, 38, 0.15)'; // 연한 빨간색
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
+            // 점의 밀도를 낮춰서 시각적으로 깔끔하게 조정 (i++ 에서 i+=15 로 변경)
+            for (let i = 0; i < drawCount; i += 15) {
+                const p = validPoints[i];
+                // (x, y) 에서 (y, x)로 선 긋기
+                ctx.beginPath();
+                ctx.moveTo(m2cX(p.x), m2cY(p.y));
+                ctx.lineTo(m2cX(p.y), m2cY(p.x));
+                ctx.stroke();
+            }
+
+            // y = log2(x) 로그함수 그리기 (파이썬 코드의 line_log 역할)
+            if (drawCount > 0) {
+                ctx.strokeStyle = '#dc2626'; // 빨간색
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                for (let i = 0; i < drawCount; i++) {
+                    const p = validPoints[i];
+                    // 지수함수 점 (x, y)의 대칭점은 (y, x) 이며 이것이 로그함수 점이 됨
+                    if (i === 0) ctx.moveTo(m2cX(p.y), m2cY(p.x));
+                    else ctx.lineTo(m2cX(p.y), m2cY(p.x));
+                }
+                ctx.stroke();
+                
+                // 현재 이동 중인 끝 점 표시
+                if (drawCount - 1 >= 0 && drawCount - 1 < validPoints.length) {
+                    const lastPoint = validPoints[drawCount - 1];
+                    ctx.fillStyle = '#dc2626';
+                    ctx.beginPath();
+                    ctx.arc(m2cX(lastPoint.y), m2cY(lastPoint.x), 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // --- 추가된 부분: 특정 주요 점들의 대칭(좌표) 강조 ---
+            ctx.font = 'bold 13px sans-serif';
+            
+            keyXs.forEach((kx, index) => {
+                const ky = Math.pow(2, kx);
+                // 애니메이션이 해당 단계의 목표 프레임 이상 진행되었을 때 표시
+                if (currentFrame >= stepFrames[index]) {
+                    // 원래 지수함수의 점 (파란색)
+                    ctx.fillStyle = '#2563eb';
+                    ctx.beginPath(); ctx.arc(m2cX(kx), m2cY(ky), 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillText(`(${kx}, ${ky})`, m2cX(kx) - 50, m2cY(ky) - 10);
+
+                    // 대칭된 로그함수의 점 (빨간색)
+                    ctx.fillStyle = '#dc2626';
+                    ctx.beginPath(); ctx.arc(m2cX(ky), m2cY(kx), 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillText(`(${ky}, ${kx})`, m2cX(ky) + 10, m2cY(kx) + 15);
+
+                    // 두 점을 잇는 강조 대칭선 (검은색 점선)
+                    ctx.strokeStyle = '#475569';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.moveTo(m2cX(kx), m2cY(ky));
+                    ctx.lineTo(m2cX(ky), m2cY(kx));
+                    ctx.stroke();
+                    ctx.setLineDash([]); // 점선 초기화
+                }
+            });
+            // -----------------------------------------------------
+
+            // 프레임 업데이트 (목표 지점까지 애니메이션)
+            if (isPlaying && currentFrame < targetFrame) {
+                currentFrame += 4; // 애니메이션 속도
+                if (currentFrame > targetFrame) currentFrame = targetFrame; // 목표치 초과 방지
+                animationId = requestAnimationFrame(drawAnimation);
+            } else if (isPlaying && currentFrame >= targetFrame) {
+                // 목표 프레임 도달 시 정지
+                isPlaying = false;
+                
+                // 마지막 단계까지 완료되었으면 버튼 상태 변경
+                if (currentStep >= stepFrames.length) {
+                    nextBtn.innerText = "모든 단계 완료";
+                    nextBtn.disabled = true;
+                    nextBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+
+        // 버튼 이벤트 리스너
+        nextBtn.addEventListener('click', () => {
+            if (currentStep < stepFrames.length && !isPlaying) {
+                targetFrame = stepFrames[currentStep];
+                currentStep++;
+                isPlaying = true;
+                drawAnimation();
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            currentFrame = 0;
+            currentStep = 0;
+            targetFrame = 0;
+            isPlaying = false;
+            cancelAnimationFrame(animationId);
+            
+            nextBtn.innerText = "다음 단계";
+            nextBtn.disabled = false;
+            nextBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            
+            drawAnimation(); // 초기 화면 그리기
+        });
+
+        // 초기 시작 (정지 상태로)
+        drawAnimation();
+    </script>
+</body>
+</html>
